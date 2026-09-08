@@ -105,6 +105,18 @@ require_fixed \
     app/Sources/UsageOwl/Services/Format.swift
 
 # ------------------------------------------------------------
+# Custom-fork updater
+# ------------------------------------------------------------
+
+require_fixed \
+    'https://api.github.com/repos/RealRONiN/usageowl/releases/latest' \
+    app/Sources/UsageOwl/Services/UpdateChecker.swift
+
+forbid_fixed \
+    'https://api.github.com/repos/usageowl/usageowl/releases/latest' \
+    app/Sources/UsageOwl/Services/UpdateChecker.swift
+
+# ------------------------------------------------------------
 # Native reset notifications
 # ------------------------------------------------------------
 

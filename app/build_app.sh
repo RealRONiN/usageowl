@@ -10,7 +10,7 @@ BIN_NAME="UsageOwl"
 # Single source of truth for the shipped version. The updater compares this
 # (via CFBundleShortVersionString) against the latest GitHub release tag, so a
 # release MUST be tagged v$VERSION or every user is told they're out of date.
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-1.0.1}"
 
 # Universal, not arm64-only. The README and the site FAQ both promise a binary
 # that "runs natively on Apple Silicon and Intel"; building one arch made that

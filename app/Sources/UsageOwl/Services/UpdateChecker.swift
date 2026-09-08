@@ -56,7 +56,7 @@ final class UpdateChecker {
 
     /// Public releases feed for the repo the app actually ships from.
     private static let latestReleaseURL = URL(
-        string: "https://api.github.com/repos/usageowl/usageowl/releases/latest")!
+        string: "https://api.github.com/repos/RealRONiN/usageowl/releases/latest")!
 
     private static let lastCheckKey = "update.lastCheck"
     private static let skippedVersionKey = "update.skippedVersion"

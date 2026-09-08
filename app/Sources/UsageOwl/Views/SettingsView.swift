@@ -216,7 +216,7 @@ private struct UpdateRow: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Version \(Self.bundleVersion)")
-                Text("Checks GitHub Releases once a day. You're always asked before anything downloads.")
+                Text("Checks RealRONiN/usageowl releases once a day. You're always asked before anything downloads.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

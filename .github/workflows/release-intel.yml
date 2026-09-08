@@ -1,0 +1,145 @@
+name: Release Intel
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish Intel release
+    runs-on: macos-15-intel
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout tagged commit
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Validate release tag and branch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="$GITHUB_REF_NAME"
+          VERSION="${TAG#v}"
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Release tag must be vMAJOR.MINOR.PATCH"
+              exit 1
+          fi
+
+          git fetch origin custom
+
+          CUSTOM_SHA="$(git rev-parse origin/custom)"
+          TAG_SHA="$(git rev-parse "$GITHUB_SHA")"
+
+          echo "Tag:        $TAG"
+          echo "Version:    $VERSION"
+          echo "Tag SHA:    $TAG_SHA"
+          echo "custom SHA: $CUSTOM_SHA"
+
+          if [ "$TAG_SHA" != "$CUSTOM_SHA" ]; then
+              echo "::error::Release tag must point exactly at current custom HEAD"
+              exit 1
+          fi
+
+          if [ "$(uname -m)" != "x86_64" ]; then
+              echo "::error::Expected Intel x86_64 runner"
+              exit 1
+          fi
+
+      - name: Verify custom invariants
+        run: .github/scripts/verify-custom.sh
+
+      - name: Build tagged version
+        shell: bash
+        working-directory: app
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="$VERSION" ./build_app.sh
+
+      - name: Verify built application
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APP="$GITHUB_WORKSPACE/app/dist/UsageOwl.app"
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          test -d "$APP"
+
+          BUNDLE_ID="$(
+              defaults read \
+                  "$APP/Contents/Info" \
+                  CFBundleIdentifier
+          )"
+
+          BUNDLE_VERSION="$(
+              defaults read \
+                  "$APP/Contents/Info" \
+                  CFBundleShortVersionString
+          )"
+
+          ARCH="$(
+              lipo -archs \
+                  "$APP/Contents/MacOS/UsageOwl"
+          )"
+
+          echo "Bundle ID: $BUNDLE_ID"
+          echo "Version:   $BUNDLE_VERSION"
+          echo "Arch:      $ARCH"
+
+          [ "$BUNDLE_ID" = "com.usageowl.app" ]
+          [ "$BUNDLE_VERSION" = "$VERSION" ]
+          [ "$ARCH" = "x86_64" ]
+
+          codesign --verify --deep --strict "$APP"
+
+      - name: Package release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          ditto \
+              -c \
+              -k \
+              --sequesterRsrc \
+              --keepParent \
+              app/dist/UsageOwl.app \
+              "UsageOwl-${VERSION}-Intel.zip"
+
+          shasum -a 256 \
+              "UsageOwl-${VERSION}-Intel.zip" \
+              > "UsageOwl-${VERSION}-Intel.zip.sha256"
+
+          cat "UsageOwl-${VERSION}-Intel.zip.sha256"
+
+      - name: Publish GitHub release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          gh release create "$GITHUB_REF_NAME" \
+              "UsageOwl-${VERSION}-Intel.zip" \
+              "UsageOwl-${VERSION}-Intel.zip.sha256" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "UsageOwl ${VERSION} — Intel custom fork" \
+              --generate-notes
