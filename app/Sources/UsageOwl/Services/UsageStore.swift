@@ -20,6 +20,29 @@ final class UsageStore: ObservableObject {
     @Published var notificationsEnabled: Bool {
         didSet { UserDefaults.standard.set(notificationsEnabled, forKey: Self.notificationsKey) }
     }
+
+    /// Native macOS alert 10 minutes before a reported quota reset.
+    @Published var resetWarningNotificationsEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(
+                resetWarningNotificationsEnabled,
+                forKey: Self.resetWarningNotificationsKey
+            )
+            reconcileResetNotifications()
+        }
+    }
+
+    /// Native macOS alert at the provider-reported reset instant.
+    @Published var resetCompletionNotificationsEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(
+                resetCompletionNotificationsEnabled,
+                forKey: Self.resetCompletionNotificationsKey
+            )
+            reconcileResetNotifications()
+        }
+    }
+
     @Published var launchAtLogin: Bool {
         didSet { applyLaunchAtLogin() }
     }
@@ -30,6 +53,8 @@ final class UsageStore: ObservableObject {
 
     private static let intervalKey = "refreshInterval"
     private static let notificationsKey = "notificationsEnabled"
+    private static let resetWarningNotificationsKey = "resetWarningNotificationsEnabled"
+    private static let resetCompletionNotificationsKey = "resetCompletionNotificationsEnabled"
     private static let menuBarKey = "showInMenuBar."
     private static let owlLogoKey = "showOwlLogoInMenuBar"
     private var timer: Timer?
@@ -44,6 +69,10 @@ final class UsageStore: ObservableObject {
         let stored = defaults.integer(forKey: Self.intervalKey)
         refreshInterval = [30, 60, 300].contains(stored) ? stored : 60
         notificationsEnabled = defaults.object(forKey: Self.notificationsKey) as? Bool ?? true
+        resetWarningNotificationsEnabled =
+            defaults.object(forKey: Self.resetWarningNotificationsKey) as? Bool ?? true
+        resetCompletionNotificationsEnabled =
+            defaults.object(forKey: Self.resetCompletionNotificationsKey) as? Bool ?? true
         launchAtLogin = SMAppService.mainApp.status == .enabled
         showOwlLogo = defaults.object(forKey: Self.owlLogoKey) as? Bool ?? true
         for snapshot in previewSnapshots { snapshots[snapshot.id] = snapshot }
@@ -151,11 +180,32 @@ final class UsageStore: ObservableObject {
         }
         for snap in results {
             snapshots[snap.id] = snap
-            if notificationsEnabled { Notifier.shared.check(snapshot: snap) }
+
+            if notificationsEnabled {
+                Notifier.shared.check(snapshot: snap)
+            }
+
+            Notifier.shared.syncResetNotifications(
+                snapshot: snap,
+                warningEnabled: resetWarningNotificationsEnabled,
+                completionEnabled: resetCompletionNotificationsEnabled
+            )
         }
         applyMenuBarDefaults()
         regenerateMenuBarImage()
         lastUpdated = Date()
+    }
+
+    /// Reconcile already-known snapshots immediately when a notification
+    /// preference changes, rather than waiting for the next provider refresh.
+    private func reconcileResetNotifications() {
+        for snapshot in snapshots.values {
+            Notifier.shared.syncResetNotifications(
+                snapshot: snapshot,
+                warningEnabled: resetWarningNotificationsEnabled,
+                completionEnabled: resetCompletionNotificationsEnabled
+            )
+        }
     }
 
     private func scheduleTimer() {

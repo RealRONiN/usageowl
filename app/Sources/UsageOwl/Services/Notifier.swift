@@ -11,6 +11,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
     private var resetMarkers: [String: Date] = [:]
     private var monthMarkers: [String: String] = [:]
 
+    /// Prevents an older asynchronous pending-request lookup from winning
+    /// after a newer refresh/preferences change has already been requested.
+    private var resetScheduleGeneration: [String: Int] = [:]
+
     /// Spend alerts start at 50%: crossing a quarter of a monthly money cap is
     /// routine, and this is the one alert that shouldn't cry wolf.
     private static let spendThresholds = [50, 75, 90]
@@ -95,6 +99,187 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate, @unchecked Sen
         content.sound = .default
         let id = "\(snapshot.id).\(window.label).\(threshold)"
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+    }
+
+    // MARK: - Reset notifications
+
+    /// Reconciles native macOS notifications for every reset timestamp reported
+    /// by one provider. Stable request identifiers mean a changed reset time
+    /// replaces the old pending request instead of creating duplicates.
+    func syncResetNotifications(
+        snapshot: UsageSnapshot,
+        warningEnabled: Bool,
+        completionEnabled: Bool
+    ) {
+        guard bundled, snapshot.error == nil else { return }
+
+        queue.async {
+            let providerID = snapshot.id
+            let generation =
+                (self.resetScheduleGeneration[providerID] ?? 0) + 1
+
+            self.resetScheduleGeneration[providerID] = generation
+
+            let requests = Self.makeResetRequests(
+                snapshot: snapshot,
+                warningEnabled: warningEnabled,
+                completionEnabled: completionEnabled
+            )
+
+            let desiredIDs = Set(requests.map(\.identifier))
+            let prefix = Self.resetPrefix(providerID: providerID)
+            let center = UNUserNotificationCenter.current()
+
+            center.getPendingNotificationRequests { pending in
+                self.queue.async {
+                    guard self.resetScheduleGeneration[providerID] == generation else {
+                        return
+                    }
+
+                    // Remove only obsolete reset requests belonging to this
+                    // provider. Threshold/spend alerts are deliberately left alone.
+                    let staleIDs = pending
+                        .map(\.identifier)
+                        .filter {
+                            $0.hasPrefix(prefix) &&
+                            !desiredIDs.contains($0)
+                        }
+
+                    if !staleIDs.isEmpty {
+                        center.removePendingNotificationRequests(
+                            withIdentifiers: staleIDs
+                        )
+                    }
+
+                    // Adding the same identifier replaces its previous pending
+                    // request, which also handles provider reset-time changes.
+                    for request in requests {
+                        center.add(request)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Quick manual verification from Settings so we do not have to wait for
+    /// a real five-hour/weekly reset to prove macOS delivery works.
+    func sendTestResetNotification() {
+        guard bundled else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "UsageOwl reset notifications are working"
+        content.body = "This is a native macOS test notification."
+        content.sound = .default
+
+        let trigger = UNTimeIntervalNotificationTrigger(
+            timeInterval: 3,
+            repeats: false
+        )
+
+        let request = UNNotificationRequest(
+            identifier: "usageowl.reset.test",
+            content: content,
+            trigger: trigger
+        )
+
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    private static func makeResetRequests(
+        snapshot: UsageSnapshot,
+        warningEnabled: Bool,
+        completionEnabled: Bool
+    ) -> [UNNotificationRequest] {
+        let now = Date()
+        var requests: [UNNotificationRequest] = []
+
+        for window in snapshot.windows {
+            guard
+                let reset = window.resetDate,
+                reset.timeIntervalSince(now) > 1
+            else {
+                continue
+            }
+
+            // The provider and window label form a stable identity. We do NOT
+            // include the reset timestamp, because the same request should be
+            // replaced when a provider revises that timestamp.
+            let baseID =
+                "\(resetPrefix(providerID: snapshot.id))\(window.label)"
+
+            if warningEnabled {
+                let warningDate = reset.addingTimeInterval(-10 * 60)
+
+                if warningDate.timeIntervalSince(now) > 1 {
+                    let content = UNMutableNotificationContent()
+                    content.title =
+                        "\(snapshot.displayName): \(Format.displayLabel(window.label)) resets in 10 minutes"
+
+                    var body =
+                        "Current usage: \(Format.percent(window.usedPercent))"
+
+                    if let resetText = Format.resetText(reset) {
+                        body += " · \(resetText)"
+                    }
+
+                    content.body = body
+                    content.sound = .default
+
+                    if let request = scheduledRequest(
+                        identifier: baseID + ".warning",
+                        content: content,
+                        fireDate: warningDate
+                    ) {
+                        requests.append(request)
+                    }
+                }
+            }
+
+            if completionEnabled {
+                let content = UNMutableNotificationContent()
+                content.title =
+                    "\(snapshot.displayName): \(Format.displayLabel(window.label)) reset"
+
+                content.body =
+                    "Your \(Format.displayLabel(window.label)) usage window has reset."
+
+                content.sound = .default
+
+                if let request = scheduledRequest(
+                    identifier: baseID + ".reset",
+                    content: content,
+                    fireDate: reset
+                ) {
+                    requests.append(request)
+                }
+            }
+        }
+
+        return requests
+    }
+
+    private static func scheduledRequest(
+        identifier: String,
+        content: UNMutableNotificationContent,
+        fireDate: Date
+    ) -> UNNotificationRequest? {
+        let delay = fireDate.timeIntervalSinceNow
+        guard delay > 1 else { return nil }
+
+        let trigger = UNTimeIntervalNotificationTrigger(
+            timeInterval: delay,
+            repeats: false
+        )
+
+        return UNNotificationRequest(
+            identifier: identifier,
+            content: content,
+            trigger: trigger
+        )
+    }
+
+    private static func resetPrefix(providerID: String) -> String {
+        "usageowl.reset.\(providerID)."
     }
 
     /// Show banners even while the app is frontmost.

@@ -43,9 +43,38 @@ struct SettingsView: View {
                     Text("1 minute").tag(60)
                     Text("5 minutes").tag(300)
                 }
-                Toggle("Threshold notifications (25 / 50 / 75 / 90%)", isOn: $store.notificationsEnabled)
                 Toggle("Owl logo in menu bar", isOn: $store.showOwlLogo)
                 Toggle("Launch at login", isOn: $store.launchAtLogin)
+            }
+
+            Section("Notifications") {
+                Toggle(
+                    "Usage thresholds (25 / 50 / 75 / 90%)",
+                    isOn: $store.notificationsEnabled
+                )
+
+                Toggle(
+                    "10 minutes before a limit reset",
+                    isOn: $store.resetWarningNotificationsEnabled
+                )
+
+                Toggle(
+                    "When a limit resets",
+                    isOn: $store.resetCompletionNotificationsEnabled
+                )
+
+                HStack {
+                    Text("Reset alerts use the reset timestamps reported by ChatGPT and Claude.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Spacer()
+
+                    Button("Send Test Notification") {
+                        Notifier.shared.sendTestResetNotification()
+                    }
+                }
             }
 
             Section("Menu Bar") {
@@ -62,7 +91,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 540, height: 620)
+        .frame(width: 560, height: 700)
     }
 
     private func menuBarBinding(for providerID: String) -> Binding<Bool> {
