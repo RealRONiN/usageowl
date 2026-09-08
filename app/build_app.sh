@@ -15,12 +15,12 @@ VERSION="${VERSION:-1.0.0}"
 # Universal, not arm64-only. The README and the site FAQ both promise a binary
 # that "runs natively on Apple Silicon and Intel"; building one arch made that
 # false and left the app unable to launch at all on Intel Macs.
-swift build -c release --arch arm64 --arch x86_64
+swift build -c release --arch x86_64
 
 # Multi-arch builds land in a different place than single-arch ones.
 BUILT_BIN=".build/apple/Products/Release/${BIN_NAME}"
 if [ ! -f "$BUILT_BIN" ]; then
-    BUILT_BIN=".build/arm64-apple-macosx/release/${BIN_NAME}"
+    BUILT_BIN=".build/x86_64-apple-macosx/release/${BIN_NAME}"
 fi
 [ -f "$BUILT_BIN" ] || { echo "error: no built binary found" >&2; exit 1; }
 

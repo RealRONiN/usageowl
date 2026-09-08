@@ -17,7 +17,7 @@ struct MenuPopover: View {
             Divider()
             ScrollView {
                 VStack(spacing: 10) {
-                    ForEach(ProviderRegistry.all, id: \.id) { provider in
+                    ForEach(ProviderRegistry.all.filter { ["codex", "claude"].contains($0.id) }, id: \.id) { provider in
                         ProviderCard(provider: provider, snapshot: store.snapshots[provider.id])
                     }
                 }
@@ -44,7 +44,7 @@ struct MenuPopover: View {
     /// `measuredCardsHeight` takes over for the exact fit.
     private var estimatedCardsHeight: CGFloat {
         var total: CGFloat = 24  // padding: 12 top + 12 bottom
-        for (index, provider) in ProviderRegistry.all.enumerated() {
+        for (index, provider) in ProviderRegistry.all.filter { ["codex", "claude"].contains($0.id) }.enumerated() {
             if index > 0 { total += 10 }  // VStack spacing
             total += cardHeight(snapshot: store.snapshots[provider.id])
         }
@@ -108,7 +108,7 @@ struct MenuPopover: View {
             Text("MENU BAR")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
-            ForEach(ProviderRegistry.all, id: \.id) { provider in
+            ForEach(ProviderRegistry.all.filter { ["codex", "claude"].contains($0.id) }, id: \.id) { provider in
                 HStack(spacing: 8) {
                     ProviderGlyph(kind: ProviderGlyph.Kind(providerID: provider.id), color: .primary)
                         .frame(width: 13, height: 13)
