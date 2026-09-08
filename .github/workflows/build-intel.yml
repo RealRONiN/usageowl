@@ -1,0 +1,93 @@
+name: Build Intel
+
+on:
+  push:
+    branches:
+      - custom
+  pull_request:
+    branches:
+      - custom
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-intel-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: macOS Intel build
+    runs-on: macos-15-intel
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Environment
+        run: |
+          sw_vers
+          uname -m
+          swift --version
+
+          if [ "$(uname -m)" != "x86_64" ]; then
+            echo "::error::Expected Intel x86_64 runner"
+            exit 1
+          fi
+
+      - name: Verify custom invariants
+        run: .github/scripts/verify-custom.sh
+
+      - name: Build UsageOwl
+        working-directory: app
+        run: ./build_app.sh
+
+      - name: Verify application
+        run: |
+          APP="$GITHUB_WORKSPACE/app/dist/UsageOwl.app"
+
+          test -d "$APP"
+
+          ID="$(
+            defaults read "$APP/Contents/Info" CFBundleIdentifier
+          )"
+
+          ARCH="$(
+            lipo -archs "$APP/Contents/MacOS/UsageOwl"
+          )"
+
+          echo "Bundle ID: $ID"
+          echo "Architecture: $ARCH"
+
+          if [ "$ID" != "com.usageowl.app" ]; then
+            echo "::error::Bundle identifier changed"
+            exit 1
+          fi
+
+          if [ "$ARCH" != "x86_64" ]; then
+            echo "::error::Build is not x86_64-only"
+            exit 1
+          fi
+
+          codesign --verify --deep --strict "$APP"
+
+      - name: Package artifact
+        run: |
+          ditto \
+            -c \
+            -k \
+            --sequesterRsrc \
+            --keepParent \
+            app/dist/UsageOwl.app \
+            UsageOwl-intel.zip
+
+      - name: Upload Intel build
+        uses: actions/upload-artifact@v7
+        with:
+          name: UsageOwl-Intel-${{ github.sha }}
+          path: UsageOwl-intel.zip
+          if-no-files-found: error
+          retention-days: 14

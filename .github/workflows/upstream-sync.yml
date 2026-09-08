@@ -1,0 +1,344 @@
+name: Upstream Sync
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * *'
+      timezone: 'Asia/Kolkata'
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: usageowl-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Merge safe upstream changes
+    runs-on: macos-15-intel
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout custom branch
+        uses: actions/checkout@v7
+        with:
+          ref: custom
+          fetch-depth: 0
+
+      - name: Fetch official upstream
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git remote remove upstream 2>/dev/null || true
+
+          git remote add upstream \
+            https://github.com/usageowl/usageowl.git
+
+          git fetch upstream main --prune
+
+          echo "Custom:"
+          git log -1 --oneline HEAD
+
+          echo
+          echo "Upstream:"
+          git log -1 --oneline upstream/main
+
+      - name: Safely merge, verify and build
+        run: |
+          set -euo pipefail
+
+          flag_issue() {
+              local title="$1"
+              local body="$2"
+
+              echo
+              echo "FLAGGING FOR MANUAL REVIEW:"
+              echo "$title"
+
+              local existing
+
+              existing="$(
+                gh issue list \
+                  --state open \
+                  --limit 100 \
+                  --json number,title \
+                  --jq ".[] | select(.title == \"$title\") | .number" |
+                head -1
+              )"
+
+              if [ -n "$existing" ]; then
+                  echo "Existing issue: #$existing"
+              else
+                  gh issue create \
+                    --title "$title" \
+                    --body "$body" \
+                    --label "upstream-sync-review"
+              fi
+          }
+
+          # --------------------------------------------------
+          # Nothing to do?
+          # --------------------------------------------------
+
+          if git merge-base --is-ancestor upstream/main HEAD; then
+              echo "Already contains latest upstream/main."
+              exit 0
+          fi
+
+          UPSTREAM_SHA="$(git rev-parse upstream/main)"
+          UPSTREAM_SHORT="$(git rev-parse --short upstream/main)"
+          BASE="$(git merge-base HEAD upstream/main)"
+
+          echo "Merge base:     $BASE"
+          echo "Upstream SHA:   $UPSTREAM_SHA"
+
+          echo
+          echo "Official upstream changes since last shared base:"
+
+          CHANGED="$(
+            git diff \
+              --name-only \
+              "$BASE"..upstream/main
+          )"
+
+          printf '%s\n' "$CHANGED"
+
+          # --------------------------------------------------
+          # Never automatically integrate changes to the
+          # persistent WebKit login mechanism or build identity.
+          # --------------------------------------------------
+
+          SENSITIVE="$(
+            printf '%s\n' "$CHANGED" |
+            grep -E \
+              '^(app/Sources/UsageOwl/Services/WebSession\.swift|app/Sources/UsageOwl/Views/WebLoginView\.swift|app/build_app\.sh)$' \
+              || true
+          )"
+
+          if [ -n "$SENSITIVE" ]; then
+              TITLE="[upstream-sync] Manual auth review required for $UPSTREAM_SHORT"
+
+              BODY="$(cat <<EOF
+          Automatic synchronization stopped before merging anything.
+
+          Upstream commit:
+
+          \`$UPSTREAM_SHA\`
+
+          The official repository changed one or more files that are deliberately protected because this fork must preserve the existing Claude WebKit login and app identity:
+
+          \`\`\`
+          $SENSITIVE
+          \`\`\`
+
+          The custom branch was NOT modified.
+
+          Review these upstream changes manually before integrating them.
+          EOF
+          )"
+
+              flag_issue "$TITLE" "$BODY"
+              exit 1
+          fi
+
+          # --------------------------------------------------
+          # Attempt the real Git merge.
+          # --------------------------------------------------
+
+          set +e
+          git merge \
+            --no-edit \
+            upstream/main
+
+          MERGE_STATUS=$?
+          set -e
+
+          if [ "$MERGE_STATUS" -ne 0 ]; then
+              CONFLICTS="$(
+                git diff \
+                  --name-only \
+                  --diff-filter=U \
+                  || true
+              )"
+
+              git merge --abort || true
+
+              TITLE="[upstream-sync] Merge conflict at $UPSTREAM_SHORT"
+
+              BODY="$(cat <<EOF
+          UsageOwl upstream could not be merged automatically.
+
+          Upstream commit:
+
+          \`$UPSTREAM_SHA\`
+
+          Conflicting files:
+
+          \`\`\`
+          $CONFLICTS
+          \`\`\`
+
+          No changes were pushed to \`custom\`.
+          EOF
+          )"
+
+              flag_issue "$TITLE" "$BODY"
+              exit 1
+          fi
+
+          # --------------------------------------------------
+          # Verify every custom invariant after the merge.
+          # --------------------------------------------------
+
+          set +e
+
+          VERIFY_OUTPUT="$(
+            .github/scripts/verify-custom.sh 2>&1
+          )"
+
+          VERIFY_STATUS=$?
+
+          set -e
+
+          printf '%s\n' "$VERIFY_OUTPUT"
+
+          if [ "$VERIFY_STATUS" -ne 0 ]; then
+              TITLE="[upstream-sync] Custom invariant failed at $UPSTREAM_SHORT"
+
+              BODY="$(cat <<EOF
+          Upstream merged without a textual Git conflict, but a UsageOwl custom invariant no longer holds.
+
+          Upstream commit:
+
+          \`$UPSTREAM_SHA\`
+
+          Verification output:
+
+          \`\`\`
+          $VERIFY_OUTPUT
+          \`\`\`
+
+          Nothing was pushed to \`custom\`.
+          EOF
+          )"
+
+              flag_issue "$TITLE" "$BODY"
+              exit 1
+          fi
+
+          # --------------------------------------------------
+          # Compile the merged result on a real Intel runner.
+          # --------------------------------------------------
+
+          set +e
+
+          (
+              cd app
+              ./build_app.sh
+          ) 2>&1 | tee /tmp/usageowl-build.log
+
+          BUILD_STATUS=${PIPESTATUS[0]}
+
+          set -e
+
+          if [ "$BUILD_STATUS" -ne 0 ]; then
+              BUILD_TAIL="$(
+                tail -100 /tmp/usageowl-build.log
+              )"
+
+              TITLE="[upstream-sync] Intel build failed at $UPSTREAM_SHORT"
+
+              BODY="$(cat <<EOF
+          Upstream merged and passed source invariants, but the Intel build failed.
+
+          Upstream commit:
+
+          \`$UPSTREAM_SHA\`
+
+          Last build output:
+
+          \`\`\`
+          $BUILD_TAIL
+          \`\`\`
+
+          Nothing was pushed to \`custom\`.
+          EOF
+          )"
+
+              flag_issue "$TITLE" "$BODY"
+              exit 1
+          fi
+
+          # --------------------------------------------------
+          # Verify resulting app identity and architecture.
+          # --------------------------------------------------
+
+          APP="$PWD/app/dist/UsageOwl.app"
+
+          BUNDLE_ID="$(
+              defaults read \
+                  "$APP/Contents/Info" \
+                  CFBundleIdentifier
+          )"
+
+          ARCH="$(
+              lipo -archs \
+                  "$APP/Contents/MacOS/UsageOwl"
+          )"
+
+          echo
+          echo "Bundle ID: $BUNDLE_ID"
+          echo "Architecture: $ARCH"
+
+          if [ "$BUNDLE_ID" != "com.usageowl.app" ] ||
+             [ "$ARCH" != "x86_64" ]; then
+
+              TITLE="[upstream-sync] Built-app invariant failed at $UPSTREAM_SHORT"
+
+              BODY="$(cat <<EOF
+          The merged app compiled but failed its identity/architecture safeguard.
+
+          Upstream commit:
+
+          \`$UPSTREAM_SHA\`
+
+          Bundle ID:
+          \`$BUNDLE_ID\`
+
+          Architecture:
+          \`$ARCH\`
+
+          Nothing was pushed to \`custom\`.
+          EOF
+          )"
+
+              flag_issue "$TITLE" "$BODY"
+              exit 1
+          fi
+
+          codesign \
+              --verify \
+              --deep \
+              --strict \
+              "$APP"
+
+          # --------------------------------------------------
+          # Only now is the upstream merge considered safe.
+          # --------------------------------------------------
+
+          echo
+          echo "SAFE UPSTREAM UPDATE VERIFIED."
+          echo "Pushing merge to custom..."
+
+          git push origin HEAD:custom
+
+          echo
+          echo "Upstream $UPSTREAM_SHORT successfully integrated."
