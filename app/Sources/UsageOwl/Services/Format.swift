@@ -2,6 +2,10 @@ import Foundation
 
 /// Shared formatting and tolerant parsing helpers.
 enum Format {
+    /// User-selected display zone for this custom build.
+    /// Always use the named IANA zone rather than manually adding +05:30.
+    private static let indiaTimeZone = TimeZone(identifier: "Asia/Kolkata")!
+
     private static let isoFrac: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -34,18 +38,34 @@ enum Format {
         return "resets in \(max(m, 1))m"
     }
 
-    /// "Resets at 14:09" (same day) or "Resets on 24 Jul at 11:59 PM" (later).
+    /// Reset timestamps displayed in 12-hour India Standard Time.
     static func resetText(_ date: Date?) -> String? {
         guard let date else { return nil }
         if date.timeIntervalSinceNow <= 0 { return "Resetting…" }
-        if Calendar.current.isDateInToday(date) {
-            let f = DateFormatter()
-            f.dateFormat = "HH:mm"
-            return "Resets at \(f.string(from: date))"
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = indiaTimeZone
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = indiaTimeZone
+
+        if calendar.isDate(date, inSameDayAs: Date()) {
+            formatter.dateFormat = "h:mm a"
+            return "Resets at \(formatter.string(from: date)) IST"
         }
-        let f = DateFormatter()
-        f.dateFormat = "d MMM 'at' h:mm a"
-        return "Resets on \(f.string(from: date))"
+
+        formatter.dateFormat = "EEE, d MMM 'at' h:mm a"
+        return "Resets on \(formatter.string(from: date)) IST"
+    }
+
+    /// Clock display used by the popover footer.
+    static func timeIST(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = indiaTimeZone
+        formatter.dateFormat = "h:mm a"
+        return "\(formatter.string(from: date)) IST"
     }
 
     /// Card display label: "5-hour" -> "Session (5 hour)", "Weekly" -> "Weekly (7 day)".

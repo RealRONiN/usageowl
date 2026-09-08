@@ -48,12 +48,28 @@ struct SettingsView: View {
                 Toggle("Launch at login", isOn: $store.launchAtLogin)
             }
 
+            Section("Menu Bar") {
+                Toggle("ChatGPT", isOn: menuBarBinding(for: "codex"))
+                Toggle("Claude", isOn: menuBarBinding(for: "claude"))
+
+                Text("Choose which providers appear in the macOS menu-bar label. Provider cards remain visible in the UsageOwl popup.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Updates") {
                 UpdateRow()
             }
         }
         .formStyle(.grouped)
-        .frame(width: 540, height: 560)
+        .frame(width: 540, height: 620)
+    }
+
+    private func menuBarBinding(for providerID: String) -> Binding<Bool> {
+        Binding(
+            get: { store.isShownInMenuBar(providerID) },
+            set: { store.setShownInMenuBar(providerID, $0) }
+        )
     }
 
     private func reload() {
@@ -95,8 +111,15 @@ private struct WebConnectRow: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                Button("Disconnect") { disconnect() }
-                    .disabled(working)
+                if service.id == WebService.claude.id {
+                    Label("Session preserved", systemImage: "lock.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .help("Claude sign-out is disabled in this custom build to preserve the existing WebKit login.")
+                } else {
+                    Button("Disconnect") { disconnect() }
+                        .disabled(working)
+                }
             } else {
                 Button("Connect \(service.displayName)") { showLogin = true }
             }
@@ -121,6 +144,7 @@ private struct WebConnectRow: View {
     }
 
     private func disconnect() {
+        guard service.id != WebService.claude.id else { return }
         working = true
         Task {
             await WebSession.session(for: service).signOut()

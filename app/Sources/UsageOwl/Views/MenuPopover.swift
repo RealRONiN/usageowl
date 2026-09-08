@@ -1,15 +1,9 @@
 import SwiftUI
 
-/// The menu bar popup: header, provider cards, menu-bar picker, footer.
+/// The menu bar popup: header, provider cards and footer.
 struct MenuPopover: View {
     @EnvironmentObject private var store: UsageStore
     @Environment(\.openSettings) private var openSettings
-
-    private static let timeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f
-    }()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,8 +21,6 @@ struct MenuPopover: View {
                 }
             }
             .frame(height: min(max(measuredCardsHeight ?? estimatedCardsHeight, 120), 940))
-            Divider()
-            menuBarSection
             Divider()
             footer
         }
@@ -102,40 +94,10 @@ struct MenuPopover: View {
         .padding(.vertical, 10)
     }
 
-    /// Per-provider toggles for the menu bar label — applies immediately.
-    private var menuBarSection: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text("MENU BAR")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-            ForEach(ProviderRegistry.all.filter { ["codex", "claude"].contains($0.id) }, id: \.id) { provider in
-                HStack(spacing: 8) {
-                    ProviderGlyph(kind: ProviderGlyph.Kind(providerID: provider.id), color: .primary)
-                        .frame(width: 13, height: 13)
-                    Text(provider.name).font(.callout)
-                    Spacer()
-                    Toggle("", isOn: menuBarBinding(for: provider.id))
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-    }
-
-    private func menuBarBinding(for providerID: String) -> Binding<Bool> {
-        Binding(
-            get: { store.isShownInMenuBar(providerID) },
-            set: { store.setShownInMenuBar(providerID, $0) }
-        )
-    }
-
     private var footer: some View {
         HStack {
             if let updated = store.lastUpdated {
-                Text("Last updated: \(Self.timeFormatter.string(from: updated))")
+                Text("Last updated: \(Format.timeIST(updated))")
             } else {
                 Text("Not refreshed yet")
             }
