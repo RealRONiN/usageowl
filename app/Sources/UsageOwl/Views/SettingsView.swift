@@ -80,6 +80,11 @@ struct SettingsView: View {
             Section("Menu Bar") {
                 Toggle("ChatGPT", isOn: menuBarBinding(for: "codex"))
                 Toggle("Claude", isOn: menuBarBinding(for: "claude"))
+		Toggle(
+		 "Antigravity",
+		 isOn:
+		 menuBarBinding(for:"antigravity")
+		)
 
                 Text("Choose which providers appear in the macOS menu-bar label. Provider cards remain visible in the UsageOwl popup.")
                     .font(.caption)

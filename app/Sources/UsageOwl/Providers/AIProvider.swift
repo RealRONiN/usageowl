@@ -30,6 +30,7 @@ enum ProviderRegistry {
         ChatGPTProvider(),
         ClaudeProvider(),
         CopilotProvider(),
+	AntigravityProvider(),
         MoonshotProvider(),
     ]
 }
