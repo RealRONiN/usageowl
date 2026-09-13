@@ -38,92 +38,122 @@ struct AntigravityProvider: AIProvider {
 
             let root =
             try JSONSerialization.jsonObject(
-                with:data
+                with: data
             ) as? [String:Any]
+
+            guard let models =
+                    root?["models"] as? [[String:Any]]
+            else {
+                return errorSnapshot(
+                    "Antigravity: invalid models payload"
+                )
+            }
+
+            func remaining(
+                _ model: [String:Any]
+            ) -> Double? {
+
+                if let value =
+                    model["remainingPercentage"] as? Double {
+                    return value
+                }
+
+                if let value =
+                    model["remainingPercentage"] as? NSNumber {
+                    return value.doubleValue
+                }
+
+                return nil
+            }
+
+            func makePool(
+                label: String,
+                models: [[String:Any]]
+            ) -> UsageWindow? {
+
+                let valid =
+                models.compactMap {
+                    remaining($0).map {
+                        ($0, $0, $0)
+                    }
+                }
+
+                guard let lowest =
+                        valid.min(by: {
+                            $0.0 < $1.0
+                        })
+                else {
+                    return nil
+                }
+
+                let reset =
+                models
+                    .compactMap {
+                        $0["resetTime"] as? String
+                    }
+                    .first
+
+                return UsageWindow(
+                    label: label,
+                    usedPercent:
+                        (1 - lowest.0) * 100,
+                    resetDate:
+                        Format.date(
+                            from: reset
+                        )
+                )
+            }
+
+            let gemini =
+            models.filter {
+                (($0["label"] as? String) ?? "")
+                    .lowercased()
+                    .contains("gemini")
+            }
+
+            let other =
+            models.filter {
+                let label =
+                (($0["label"] as? String) ?? "")
+                    .lowercased()
+
+                return
+                    label.contains("claude")
+                    ||
+                    label.contains("gpt")
+            }
 
             var windows:[UsageWindow] = []
 
-            
-if let models =
-    root?["models"] as? [[String:Any]]
-{
+            if let w = makePool(
+                label: "Gemini Session",
+                models: gemini
+            ) {
+                windows.append(w)
+            }
 
-    func addPool(
-        _ label: String,
-        _ pool: [[String:Any]]
-    ) {
+            if let w = makePool(
+                label: "Gemini Weekly",
+                models: gemini
+            ) {
+                windows.append(w)
+            }
 
-        guard let first = pool.first else {
-            return
-        }
+            if let w = makePool(
+                label: "Claude + GPT Session",
+                models: other
+            ) {
+                windows.append(w)
+            }
 
-        guard let remaining =
-            first["remainingPercentage"] as? Double
-        else {
-            return
-        }
+            if let w = makePool(
+                label: "Claude + GPT Weekly",
+                models: other
+            ) {
+                windows.append(w)
+            }
 
-        windows.append(
-            UsageWindow(
-                label: label,
-                usedPercent: (1 - remaining) * 100,
-                resetDate:
-                    Format.date(
-                        from:
-                        first["resetTime"] as? String
-                    )
-            )
-        )
-    }
-
-
-    let gemini =
-    models.filter {
-        (($0["label"] as? String) ?? "")
-            .lowercased()
-            .contains("gemini")
-    }
-
-
-    let nonGemini =
-    models.filter {
-        let label =
-        (($0["label"] as? String) ?? "")
-            .lowercased()
-
-        return
-            label.contains("claude")
-            ||
-            label.contains("gpt")
-    }
-
-
-    addPool(
-        "Gemini Session",
-        gemini
-    )
-
-
-    addPool(
-        "Gemini Weekly",
-        gemini
-    )
-
-
-    addPool(
-        "Claude + GPT Session",
-        nonGemini
-    )
-
-
-    addPool(
-        "Claude + GPT Weekly",
-        nonGemini
-    )
-}
-
-
-return snapshot(
+            return snapshot(
                 plan: "Google AI Pro",
                 windows: windows,
                 error:
@@ -131,7 +161,6 @@ return snapshot(
                     ? "No Antigravity quota found"
                     : nil
             )
-
 
         } catch {
 
