@@ -71,20 +71,15 @@ struct AntigravityProvider: AIProvider {
                 models: [[String:Any]]
             ) -> UsageWindow? {
 
-                let valid =
+                let remainingValues =
                 models.compactMap {
-                    remaining($0).map {
-                        ($0, $0, $0)
-                    }
+                    remaining($0)
                 }
 
-                guard let lowest =
-                        valid.min(by: {
-                            $0.0 < $1.0
-                        })
-                else {
-                    return nil
-                }
+                let usedPercent =
+                remainingValues.isEmpty
+                ? 0
+                : (1 - (remainingValues.min() ?? 1)) * 100
 
                 let reset =
                 models
@@ -95,8 +90,7 @@ struct AntigravityProvider: AIProvider {
 
                 return UsageWindow(
                     label: label,
-                    usedPercent:
-                        (1 - lowest.0) * 100,
+                    usedPercent: usedPercent,
                     resetDate:
                         Format.date(
                             from: reset
@@ -104,52 +98,52 @@ struct AntigravityProvider: AIProvider {
                 )
             }
 
-            let gemini =
-            models.filter {
-                (($0["label"] as? String) ?? "")
+            func pool(
+                for model: [String:Any]
+            ) -> String {
+
+                let label =
+                ((model["label"] as? String) ?? "")
                     .lowercased()
-                    .contains("gemini")
+
+                if label.contains("gemini") {
+                    return "Gemini"
+                }
+
+                if label.contains("claude")
+                    || label.contains("gpt") {
+                    return "Claude + GPT"
+                }
+
+                return "Other"
             }
 
-            let other =
-            models.filter {
-                let label =
-                (($0["label"] as? String) ?? "")
-                    .lowercased()
-
-                return
-                    label.contains("claude")
-                    ||
-                    label.contains("gpt")
+            let grouped =
+            Dictionary(grouping: models) {
+                pool(for: $0)
             }
 
             var windows:[UsageWindow] = []
 
             if let w = makePool(
-                label: "Gemini Session",
-                models: gemini
+                label: "Gemini",
+                models: grouped["Gemini"] ?? []
             ) {
                 windows.append(w)
             }
 
             if let w = makePool(
-                label: "Gemini Weekly",
-                models: gemini
+                label: "Claude + GPT",
+                models: grouped["Claude + GPT"] ?? []
             ) {
                 windows.append(w)
             }
 
             if let w = makePool(
-                label: "Claude + GPT Session",
-                models: other
-            ) {
-                windows.append(w)
-            }
-
-            if let w = makePool(
-                label: "Claude + GPT Weekly",
-                models: other
-            ) {
+                label: "Other",
+                models: grouped["Other"] ?? []
+            ),
+            !((grouped["Other"] ?? []).isEmpty) {
                 windows.append(w)
             }
 
