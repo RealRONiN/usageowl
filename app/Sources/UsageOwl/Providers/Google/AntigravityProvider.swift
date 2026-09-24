@@ -11,30 +11,147 @@ struct AntigravityProvider: AIProvider {
     "Sign in to Antigravity CLI or Antigravity IDE"
 
     func isAvailable() -> Bool {
-        FileManager.default.fileExists(
-            atPath: "/Users/aniket/bin/antigravity-usage-json"
-        )
+
+        let home =
+            FileManager.default
+                .homeDirectoryForCurrentUser
+                .path
+
+        let candidates = [
+            "\(home)/.local/share/mise/installs/node/lts/bin/antigravity-usage",
+            "\(home)/.local/share/mise/installs/node/24.19.0/bin/antigravity-usage",
+            "\(home)/.local/share/mise/shims/antigravity-usage",
+            "\(home)/.local/bin/antigravity-usage",
+            "/usr/local/bin/antigravity-usage",
+            "/opt/homebrew/bin/antigravity-usage"
+        ]
+
+        return candidates.contains {
+            FileManager.default.isExecutableFile(
+                atPath: $0
+            )
+        }
     }
 
 
     func fetchUsage() async -> UsageSnapshot {
 
         let process = Process()
-        let pipe = Pipe()
+        let stdout = Pipe()
+        let stderr = Pipe()
+
+        let home =
+            FileManager.default
+                .homeDirectoryForCurrentUser
+                .path
+
+        let cliCandidates = [
+            "\(home)/.local/share/mise/installs/node/lts/bin/antigravity-usage",
+            "\(home)/.local/share/mise/installs/node/24.19.0/bin/antigravity-usage",
+            "\(home)/.local/share/mise/shims/antigravity-usage",
+            "\(home)/.local/bin/antigravity-usage",
+            "/usr/local/bin/antigravity-usage",
+            "/opt/homebrew/bin/antigravity-usage"
+        ]
+
+        guard let cliPath =
+                cliCandidates.first(
+                    where: {
+                        FileManager.default
+                            .isExecutableFile(
+                                atPath: $0
+                            )
+                    }
+                )
+        else {
+            return errorSnapshot(
+                "Antigravity CLI executable not found"
+            )
+        }
 
         process.executableURL = URL(
-            fileURLWithPath:
-            "/Users/aniket/bin/antigravity-usage-json"
+            fileURLWithPath: cliPath
         )
 
-        process.standardOutput = pipe
+        process.arguments = [
+            "quota",
+            "--json",
+            "--refresh",
+            "--all-models",
+            "--method",
+            "auto"
+        ]
+
+        var environment =
+            ProcessInfo.processInfo.environment
+
+        let searchPaths = [
+            "\(home)/.local/share/mise/installs/node/lts/bin",
+            "\(home)/.local/share/mise/installs/node/24.19.0/bin",
+            "\(home)/.local/share/mise/shims",
+            "\(home)/.local/bin",
+            "/usr/local/bin",
+            "/opt/homebrew/bin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin"
+        ]
+
+        let inheritedPath =
+            environment["PATH"] ?? ""
+
+        environment["PATH"] =
+            (searchPaths + [inheritedPath])
+                .filter { !$0.isEmpty }
+                .joined(separator: ":")
+
+        process.environment = environment
+        process.standardOutput = stdout
+        process.standardError = stderr
 
         do {
 
             try process.run()
 
             let data =
-            pipe.fileHandleForReading.readDataToEndOfFile()
+                stdout.fileHandleForReading
+                    .readDataToEndOfFile()
+
+            let errorData =
+                stderr.fileHandleForReading
+                    .readDataToEndOfFile()
+
+            process.waitUntilExit()
+
+            guard process.terminationStatus == 0 else {
+
+                let details =
+                    String(
+                        data: errorData,
+                        encoding: .utf8
+                    )?
+                    .trimmingCharacters(
+                        in: .whitespacesAndNewlines
+                    ) ?? ""
+
+                let suffix =
+                    details.isEmpty
+                    ? ""
+                    : ": \(details)"
+
+                return errorSnapshot(
+                    "Antigravity CLI failed "
+                    + "(\(process.terminationStatus))"
+                    + suffix
+                )
+            }
+
+            guard !data.isEmpty else {
+                return errorSnapshot(
+                    "Antigravity CLI returned no data"
+                )
+            }
 
             let root =
             try JSONSerialization.jsonObject(
@@ -45,7 +162,7 @@ struct AntigravityProvider: AIProvider {
                     root?["models"] as? [[String:Any]]
             else {
                 return errorSnapshot(
-                    "Antigravity: invalid models payload"
+                    "Antigravity returned an unexpected models payload"
                 )
             }
 
