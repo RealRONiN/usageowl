@@ -36,7 +36,9 @@ struct MenuPopover: View {
     /// `measuredCardsHeight` takes over for the exact fit.
     private var estimatedCardsHeight: CGFloat {
         var total: CGFloat = 24  // padding: 12 top + 12 bottom
-        for (index, provider) in ProviderRegistry.all.filter { ["codex", "claude", "antigravity"].contains($0.id) }.enumerated() {
+        for (index, provider) in ProviderRegistry.all
+            .filter({ ["codex", "claude", "antigravity"].contains($0.id) })
+            .enumerated() {
             if index > 0 { total += 10 }  // VStack spacing
             total += cardHeight(snapshot: store.snapshots[provider.id])
         }

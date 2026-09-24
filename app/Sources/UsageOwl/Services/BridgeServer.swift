@@ -89,7 +89,7 @@ final class BridgeServer: @unchecked Sendable {
     }
 
     private static func redirect(to location: String) -> Data {
-        var out = "HTTP/1.1 302 Found\r\nLocation: \(location)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        let out = "HTTP/1.1 302 Found\r\nLocation: \(location)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
         return Data(out.utf8)
     }
 
