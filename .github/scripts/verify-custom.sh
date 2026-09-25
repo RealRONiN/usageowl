@@ -67,20 +67,15 @@ forbid_fixed \
     app/Sources/UsageOwl/Providers/ClaudeProvider.swift
 
 # ------------------------------------------------------------
-# ChatGPT + Claude only
+# ChatGPT + Claude + Antigravity
 # ------------------------------------------------------------
 
-FILTER='ProviderRegistry.all.filter { ["codex", "claude"].contains($0.id) }'
+FILTER='["codex", "claude", "antigravity"].contains($0.id)'
 
-FILTER_COUNT="$(
-    grep -F "$FILTER" \
-        app/Sources/UsageOwl/Views/MenuPopover.swift |
-    wc -l |
-    tr -d ' '
-)"
+FILTER_COUNT="$(grep -F -c -- "$FILTER" app/Sources/UsageOwl/Views/MenuPopover.swift || true)"
 
 if [ "$FILTER_COUNT" -lt 2 ]; then
-    fail "ChatGPT/Claude-only popup filter is missing or incomplete."
+    fail "ChatGPT/Claude/Antigravity popup filter is missing or incomplete."
 fi
 
 # Popup should not regain the old toggle section.
